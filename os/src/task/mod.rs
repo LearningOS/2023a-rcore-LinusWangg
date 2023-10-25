@@ -16,10 +16,12 @@ mod task;
 
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
+use crate::timer::{get_time_ms};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+use crate::config::MAX_SYSCALL_NUM;
 
 pub use context::TaskContext;
 
@@ -54,6 +56,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_start: 0 as usize,
+            syscall_times: [0 as u32; MAX_SYSCALL_NUM],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -81,6 +85,9 @@ impl TaskManager {
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
+        if task0.task_start == 0 as usize{
+            task0.task_start = get_time_ms() as usize;
+        }
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -123,6 +130,10 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
+            let task0 = &mut inner.tasks[next];
+            if task0.task_start == 0 as usize{
+                task0.task_start = get_time_ms() as usize;
+            }
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -134,6 +145,23 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    fn syscall_add(&self, syscall_ids: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let current_task_syscall_times = &mut inner.tasks[current].syscall_times;
+        //println!("{:?}", &current_task_syscall_times);
+        current_task_syscall_times[syscall_ids] += 1;
+        drop(inner);
+    }
+
+    fn current_info(&self) -> TaskControlBlock { 
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let taskinfo = inner.tasks[current].clone();
+        drop(inner);
+        taskinfo
     }
 }
 
@@ -168,4 +196,14 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// add syscall
+pub fn syscall_times_add(syscall_ids : usize) {
+    TASK_MANAGER.syscall_add(syscall_ids);
+}
+
+/// get taskinfo
+pub fn task_info() -> TaskControlBlock { 
+    TASK_MANAGER.current_info()
 }
