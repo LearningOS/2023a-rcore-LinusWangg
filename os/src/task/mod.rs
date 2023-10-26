@@ -17,10 +17,13 @@ mod task;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+use crate::config::{MAX_SYSCALL_NUM, PAGE_SIZE};
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+use crate::timer::{get_time_ms};
+use crate::mm::{VirtAddr, MapPermission, VPNRange};
 
 pub use context::TaskContext;
 
@@ -80,6 +83,9 @@ impl TaskManager {
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
+        if next_task.task_start == 0 as usize{
+            next_task.task_start = get_time_ms() as usize;
+        }
         drop(inner);
         let mut _unused = TaskContext::zero_init();
         // before this, we should drop local variables that must be dropped manually
@@ -141,6 +147,10 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
+            let task0 = &mut inner.tasks[next];
+            if task0.task_start == 0 as usize{
+                task0.task_start = get_time_ms() as usize;
+            }
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -152,6 +162,112 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    fn syscall_add(&self, syscall_ids: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let current_task_syscall_times = &mut inner.tasks[current].syscall_times;
+        //println!("{:?}", &current_task_syscall_times);
+        current_task_syscall_times[syscall_ids] += 1;
+        drop(inner);
+    }
+
+    fn time_info(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let task_st = &inner.tasks[current].task_start;
+        let res = get_time_ms() as usize - task_st;
+        drop(inner);
+        res
+    }
+
+    fn syscall_times_info(&self) -> [u32; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let taskinfo = &inner.tasks[current];
+        let res = taskinfo.syscall_times.clone();
+        drop(inner);
+        res
+    }
+
+    fn mmap(&self, _start: usize, _len: usize, _port: usize) -> isize {
+        if (_start % PAGE_SIZE != 0) || (_port & !0x7 != 0) || (_port & 0x7 == 0) {
+            return -1;
+        }
+
+        let map_permission = MapPermission::from_bits((_port as u8) << 1).unwrap() | MapPermission::U;
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        for vpn in vpn_range{
+            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+                if pte.is_valid() {
+                    return -1;
+                }
+            };
+        }
+
+        inner.tasks[current].memory_set.insert_framed_area(
+            start_va,
+            end_va,
+            map_permission,
+        );
+
+        for vpn in vpn_range {
+            if let None = inner.tasks[current].memory_set.translate(vpn) {
+                return -1;
+            };
+        }
+        return 0;
+    }
+
+    fn munmap(&self, _start: usize, _len: usize) -> isize {
+        if _start % PAGE_SIZE != 0 {
+            return -1;
+        }
+
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        for vpn in vpn_range {
+            if let None = inner.tasks[current].memory_set.translate(vpn) {
+                return -1;
+            };
+
+            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+                if pte.is_valid() == false {
+                    return -1;
+                }
+            };
+        }
+
+        for vpn in vpn_range {
+            //inner.tasks[current].memory_set.areas[0].unmap_one(&mut inner.tasks[current].memory_set.page_table, vpn);
+            inner.tasks[current].memory_set.munmap(vpn);
+        }
+
+        for vpn in vpn_range {
+            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+                if pte.is_valid() {
+                    return -1;
+                }
+            };
+        }
+
+        return 0;
     }
 }
 
@@ -201,4 +317,29 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// add syscall
+pub fn syscall_times_add(syscall_ids : usize) {
+    TASK_MANAGER.syscall_add(syscall_ids);
+}
+
+/// get taskinfo
+pub fn time_info() -> usize { 
+    TASK_MANAGER.time_info()
+}
+
+/// get taskinfo2
+pub fn syscall_info() -> [u32; MAX_SYSCALL_NUM] { 
+    TASK_MANAGER.syscall_times_info()
+}
+
+/// create vpn space
+pub fn mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    TASK_MANAGER.mmap(_start, _len, _port)
+}
+
+/// relieve vpn space
+pub fn munmap(_start: usize, _len: usize) -> isize {
+    TASK_MANAGER.munmap(_start, _len)
 }

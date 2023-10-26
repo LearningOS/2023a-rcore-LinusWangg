@@ -171,3 +171,16 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     }
     v
 }
+
+/// Translate a Virtual Address to Physical Address
+pub fn get_physical(token: usize, ptr: usize) -> usize {
+    let page_table = PageTable::from_token(token);
+    let virtual_address = VirtAddr::from(ptr);
+    let offset = virtual_address.page_offset();
+
+    let vpn = virtual_address.floor();
+    let ppn = page_table.translate(vpn).unwrap().ppn();
+    let physical_address = ppn.0 << 12 | offset;
+    
+    physical_address
+}
