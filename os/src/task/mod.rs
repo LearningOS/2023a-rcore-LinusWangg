@@ -22,8 +22,8 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-use crate::timer::{get_time_ms};
-use crate::mm::{VirtAddr, MapPermission, VPNRange};
+use crate::timer::{get_time_us};
+use crate::mm::{VirtAddr, MapPermission, VirtPageNum};
 
 pub use context::TaskContext;
 
@@ -84,7 +84,7 @@ impl TaskManager {
         next_task.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         if next_task.task_start == 0 as usize{
-            next_task.task_start = get_time_ms() as usize;
+            next_task.task_start = get_time_us() as usize;
         }
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -149,7 +149,7 @@ impl TaskManager {
             inner.current_task = next;
             let task0 = &mut inner.tasks[next];
             if task0.task_start == 0 as usize{
-                task0.task_start = get_time_ms() as usize;
+                task0.task_start = get_time_us() as usize;
             }
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -177,7 +177,7 @@ impl TaskManager {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
         let task_st = &inner.tasks[current].task_start;
-        let res = get_time_ms() as usize - task_st;
+        let res = get_time_us() as usize - task_st;
         drop(inner);
         res
     }
@@ -199,15 +199,16 @@ impl TaskManager {
         let map_permission = MapPermission::from_bits((_port as u8) << 1).unwrap() | MapPermission::U;
         let start_va = VirtAddr::from(_start);
         let end_va = VirtAddr::from(_start + _len);
-        let start_vpn = start_va.floor();
-        let end_vpn = end_va.ceil();
-        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+        let start_vpn = usize::from(start_va.floor());
+        let end_vpn = usize::from(end_va.ceil());
 
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
 
-        for vpn in vpn_range{
-            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+        for vpn in start_vpn..end_vpn{
+            let _vpn = VirtPageNum::from(vpn);
+            //println!("www{:?}", _vpn);
+            if let Some(pte) = inner.tasks[current].memory_set.translate(_vpn) {
                 if pte.is_valid() {
                     return -1;
                 }
@@ -220,8 +221,9 @@ impl TaskManager {
             map_permission,
         );
 
-        for vpn in vpn_range {
-            if let None = inner.tasks[current].memory_set.translate(vpn) {
+        for vpn in start_vpn..end_vpn {
+            let _vpn = VirtPageNum::from(vpn);
+            if let None = inner.tasks[current].memory_set.translate(_vpn) {
                 return -1;
             };
         }
@@ -235,32 +237,34 @@ impl TaskManager {
 
         let start_va = VirtAddr::from(_start);
         let end_va = VirtAddr::from(_start + _len);
-        let start_vpn = start_va.floor();
-        let end_vpn = end_va.ceil();
-        let vpn_range = VPNRange::new(start_vpn, end_vpn);
+        let start_vpn = usize::from(start_va.floor());
+        let end_vpn = usize::from(end_va.ceil());
 
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
 
-        for vpn in vpn_range {
-            if let None = inner.tasks[current].memory_set.translate(vpn) {
+        for vpn in start_vpn..end_vpn {
+            let _vpn = VirtPageNum::from(vpn);
+            if let None = inner.tasks[current].memory_set.translate(_vpn) {
                 return -1;
             };
 
-            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+            if let Some(pte) = inner.tasks[current].memory_set.translate(_vpn) {
                 if pte.is_valid() == false {
                     return -1;
                 }
             };
         }
 
-        for vpn in vpn_range {
-            //inner.tasks[current].memory_set.areas[0].unmap_one(&mut inner.tasks[current].memory_set.page_table, vpn);
-            inner.tasks[current].memory_set.munmap(vpn);
+        for vpn in start_vpn..end_vpn {
+            let _vpn = VirtPageNum::from(vpn);
+            //inner.tasks[current].memory_set.areas[0].unmap_one(&mut inner.tasks[current].memory_set.page_table, _vpn);
+            inner.tasks[current].memory_set.munmap(_vpn);
         }
 
-        for vpn in vpn_range {
-            if let Some(pte) = inner.tasks[current].memory_set.translate(vpn) {
+        for vpn in start_vpn..end_vpn {
+            let _vpn = VirtPageNum::from(vpn);
+            if let Some(pte) = inner.tasks[current].memory_set.translate(_vpn) {
                 if pte.is_valid() {
                     return -1;
                 }

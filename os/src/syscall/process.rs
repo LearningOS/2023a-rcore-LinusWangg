@@ -90,7 +90,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         *ptr = TaskInfo {
             status : TaskStatus::Running,
             syscall_times : syscall_tm,
-            time : tm,
+            time : tm / 1000 as usize,
         };
     }
     0
