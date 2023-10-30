@@ -21,6 +21,8 @@ const SYSCALL_YIELD: usize = 124;
 const SYSCALL_SET_PRIORITY: usize = 140;
 /// gettime syscall
 const SYSCALL_GET_TIME: usize = 169;
+/// gettime syscall 2
+/// const SYSCALL_GETTIMEOFDAY: usize = 169;
 /// getpid syscall
 const SYSCALL_GETPID: usize = 172;
 /// sbrk syscall

@@ -56,6 +56,7 @@ pub fn enable_timer_interrupt() {
 /// trap handler
 #[no_mangle]
 pub fn trap_handler() -> ! {
+    trace!("trap handler");
     set_kernel_trap_entry();
     let scause = scause::read();
     let stval = stval::read();
@@ -113,6 +114,7 @@ pub fn trap_handler() -> ! {
 /// set the reg a0 = trap_cx_ptr, reg a1 = phy addr of usr page table,
 /// finally, jump to new addr of __restore asm function
 pub fn trap_return() -> ! {
+    trace!("trap return");
     set_user_trap_entry();
     let trap_cx_ptr = TRAP_CONTEXT_BASE;
     let user_satp = current_user_token();

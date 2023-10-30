@@ -27,6 +27,8 @@ use lazy_static::*;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+use crate::config::MAX_SYSCALL_NUM;
+pub use crate::timer::get_time_us;
 
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
@@ -45,6 +47,9 @@ pub fn suspend_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
+    if task_inner.start_time == 0 as usize {
+        task_inner.start_time = get_time_us();
+    }
     drop(task_inner);
     // ---- release current PCB
 
@@ -71,6 +76,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         panic!("All applications completed!");
     }
 
+
     // **** access current TCB exclusively
     let mut inner = task.inner_exclusive_access();
     // Change status to Zombie
@@ -78,6 +84,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     // Record exit code
     inner.exit_code = exit_code;
     // do not move to its parent but under initproc
+    if inner.start_time == 0 as usize {
+        inner.start_time = get_time_us();
+    }
 
     // ++++++ access initproc TCB exclusively
     {
@@ -114,4 +123,65 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// SYSCALL_TIME ADD
+pub fn syscall_add(syscall_ids: usize) {
+    let task = current_task().unwrap();
+
+    // **** access current TCB exclusively
+    //let mut inner = task.inner_exclusive_access();
+    //println!("{:?}", &current_task_syscall_times);
+    task.update_syscall_times(syscall_ids);
+    //(inner);
+    drop(task);
+}
+
+/// time info get
+pub fn time_info() -> usize {
+    let task = current_task().unwrap();
+
+    //let inner = task.inner_exclusive_access();
+    let res = task.get_exec_time();
+    //drop(inner);
+    drop(task);
+    res
+}
+
+/// syscall times info get
+pub fn syscall_times_info() -> [u32; MAX_SYSCALL_NUM] {
+    let task = current_task().unwrap();
+
+    //let inner = task.inner_exclusive_access();
+    let res = task.get_syscall_times();
+    //drop(inner);
+    drop(task);
+    res
+}
+
+/// mmap
+pub fn mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    let task = current_task().unwrap();
+    let res = task.mmap(_start, _len, _port);
+    //drop(inner);
+    drop(task);
+    res
+}
+
+/// munmap
+pub fn munmap(_start: usize, _len: usize) -> isize {
+    let task = current_task().unwrap();
+    let res = task.munmap(_start, _len);
+    //drop(inner);
+    drop(task);
+    res
+}
+
+/// setptio
+pub fn set_priority(_prio: isize) -> isize {
+    let task = current_task().unwrap();
+    let res = task.set_priority(_prio);
+    //drop(inner);
+    drop(task);
+    res
 }

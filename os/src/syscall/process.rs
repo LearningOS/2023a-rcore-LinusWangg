@@ -7,9 +7,39 @@ use crate::{
     mm::{translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
+        suspend_current_and_run_next, TaskStatus, syscall_add, time_info, syscall_times_info, mmap, munmap, set_priority
     },
+    timer::{get_time_us},
 };
+
+/// exit syscall
+const SYSCALL_EXIT: usize = 93;
+/// yield syscall
+const SYSCALL_YIELD: usize = 124;
+/// setpriority syscall
+const SYSCALL_SET_PRIORITY: usize = 140;
+/// gettime syscall
+/// const SYSCALL_GET_TIME: usize = 169;
+/// gettime syscall 2
+const SYSCALL_GETTIMEOFDAY: usize = 169;
+/// getpid syscall
+const SYSCALL_GETPID: usize = 172;
+/// sbrk syscall
+const SYSCALL_SBRK: usize = 214;
+/// munmap syscall
+const SYSCALL_MUNMAP: usize = 215;
+/// fork syscall
+const SYSCALL_FORK: usize = 220;
+/// exec syscall
+const SYSCALL_EXEC: usize = 221;
+/// mmap syscall
+const SYSCALL_MMAP: usize = 222;
+/// waitpid syscall
+const SYSCALL_WAITPID: usize = 260;
+/// spawn syscall
+const SYSCALL_SPAWN: usize = 400;
+/// taskinfo syscall
+const SYSCALL_TASK_INFO: usize = 410;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -32,6 +62,7 @@ pub struct TaskInfo {
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!("kernel:pid[{}] sys_exit", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_EXIT);
     exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
@@ -39,17 +70,20 @@ pub fn sys_exit(exit_code: i32) -> ! {
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     trace!("kernel:pid[{}] sys_yield", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_YIELD);
     suspend_current_and_run_next();
     0
 }
 
 pub fn sys_getpid() -> isize {
     trace!("kernel: sys_getpid pid:{}", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_GETPID);
     current_task().unwrap().pid.0 as isize
 }
 
 pub fn sys_fork() -> isize {
     trace!("kernel:pid[{}] sys_fork", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_FORK);
     let current_task = current_task().unwrap();
     let new_task = current_task.fork();
     let new_pid = new_task.pid.0;
@@ -65,6 +99,7 @@ pub fn sys_fork() -> isize {
 
 pub fn sys_exec(path: *const u8) -> isize {
     trace!("kernel:pid[{}] sys_exec", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_EXEC);
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(data) = get_app_data_by_name(path.as_str()) {
@@ -80,6 +115,7 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     trace!("kernel::pid[{}] sys_waitpid [{}]", current_task().unwrap().pid.0, pid);
+    syscall_add(SYSCALL_WAITPID);
     let task = current_task().unwrap();
     // find a child process
 
@@ -119,10 +155,21 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_get_time",
         current_task().unwrap().pid.0
     );
-    -1
+    syscall_add(SYSCALL_GETTIMEOFDAY);
+    let us = get_time_us();
+    //println!("111111111111111111111");
+    let pa = translated_refmut(current_user_token(), _ts);
+    let ptr = pa as *mut TimeVal;
+    unsafe {
+        *ptr = TimeVal {
+            sec: us / 1_000_000,
+            usec: us % 1_000_000,
+        }
+    }
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -130,33 +177,49 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_task_info",
         current_task().unwrap().pid.0
     );
-    -1
+    //println!("111111111111111111111");
+    syscall_add(SYSCALL_TASK_INFO);
+    let syscall_tm = syscall_times_info();
+    let tm = time_info();
+    let pa = translated_refmut(current_user_token(), _ti);
+    let ptr = pa as *mut TaskInfo;
+    unsafe {
+        *ptr = TaskInfo {
+            status : TaskStatus::Running,
+            syscall_times : syscall_tm,
+            time : tm / 1000 as usize,
+        };
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_mmap",
         current_task().unwrap().pid.0
     );
-    -1
+    syscall_add(SYSCALL_MMAP);
+    mmap(_start, _len, _port)
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_munmap",
         current_task().unwrap().pid.0
     );
-    -1
+    syscall_add(SYSCALL_MUNMAP);
+    munmap(_start, _len)
 }
 
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
     trace!("kernel:pid[{}] sys_sbrk", current_task().unwrap().pid.0);
+    syscall_add(SYSCALL_SBRK);
     if let Some(old_brk) = current_task().unwrap().change_program_brk(size) {
         old_brk as isize
     } else {
@@ -168,17 +231,29 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_spawn",
         current_task().unwrap().pid.0
     );
-    -1
+    syscall_add(SYSCALL_SPAWN);
+    let path = translated_str(current_user_token(), _path);
+    // assume the name is valid
+    let elf_data = get_app_data_by_name(path.as_str()).unwrap();
+
+    let current_task = current_task().unwrap();
+    let new_task = current_task.spawn(elf_data);
+    let new_pid = new_task.pid.0;
+
+    //add new task to scheduler
+    add_task(new_task);
+    new_pid as isize
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    -1
+    syscall_add(SYSCALL_SET_PRIORITY);
+    set_priority(_prio)
 }

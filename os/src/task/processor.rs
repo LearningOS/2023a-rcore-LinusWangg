@@ -11,6 +11,7 @@ use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
 use lazy_static::*;
+use crate::config::{BIG_STRIDE};
 
 /// Processor management structure
 pub struct Processor {
@@ -53,6 +54,7 @@ lazy_static! {
 ///The main part of process execution and scheduling
 ///Loop `fetch_task` to get the process that needs to run, and switch the process through `__switch`
 pub fn run_tasks() {
+    trace!("run_tasks");
     loop {
         let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
@@ -60,6 +62,7 @@ pub fn run_tasks() {
             // access coming task TCB exclusively
             let mut task_inner = task.inner_exclusive_access();
             let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
+            task_inner.stride += BIG_STRIDE / task_inner.priority;
             task_inner.task_status = TaskStatus::Running;
             // release coming task_inner manually
             drop(task_inner);
@@ -78,22 +81,26 @@ pub fn run_tasks() {
 
 /// Get current task through take, leaving a None in its place
 pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
+    trace!("take_current_task");
     PROCESSOR.exclusive_access().take_current()
 }
 
 /// Get a copy of the current task
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
+    trace!("current_task");
     PROCESSOR.exclusive_access().current()
 }
 
 /// Get the current user token(addr of page table)
 pub fn current_user_token() -> usize {
+    trace!("current_user_token");
     let task = current_task().unwrap();
     task.get_user_token()
 }
 
 ///Get the mutable reference to trap context of current task
 pub fn current_trap_cx() -> &'static mut TrapContext {
+    trace!("current_trap_cx");
     current_task()
         .unwrap()
         .inner_exclusive_access()
@@ -102,6 +109,7 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 
 ///Return to idle control flow for new scheduling
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
+    trace!("schedule");
     let mut processor = PROCESSOR.exclusive_access();
     let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
     drop(processor);
