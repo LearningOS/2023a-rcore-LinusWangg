@@ -66,6 +66,13 @@ impl MemorySet {
             None,
         );
     }
+    /// unmap
+    pub fn munmap(
+        &mut self,
+        vpn: VirtPageNum,
+    ){
+        self.areas[0].unmap_one(&mut self.page_table, vpn);
+    }
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
         if let Some((idx, area)) = self
