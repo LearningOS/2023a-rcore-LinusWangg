@@ -7,7 +7,8 @@ use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use super::current_task;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+use crate::loaders::ElfLoader;
+use crate::mm::{MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
@@ -335,8 +336,9 @@ impl ProcessControlBlock {
         // push arguments on user stack
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-        
-        let mut argv_all_sz = 0;
+        let loader = ElfLoader::new(elf_data).unwrap();
+        user_sp = loader.init_stack(new_token, user_sp, args.clone());
+        /*let mut argv_all_sz = 0;
         for i in 0..args.len() {
             argv_all_sz += args[i].len() + 1
         }
@@ -368,7 +370,7 @@ impl ProcessControlBlock {
             }
             *translated_refmut(new_token, p as *mut u8) = 0;
             arg_cnt_base_mut += args[i].len() + 1;
-        }
+        }*/
         // make the user_sp aligned to 8B for k210 platform
         // user_sp -= user_sp % core::mem::size_of::<usize>();
         // initialize trap_cx
@@ -381,7 +383,7 @@ impl ProcessControlBlock {
             trap_handler as usize,
         );
         trap_cx.x[10] = args.len();
-        trap_cx.x[11] = arg_pt_base;
+        trap_cx.x[11] = user_sp + core::mem::size_of::<usize>();
         *task_inner.get_trap_cx() = trap_cx;
     }
 
