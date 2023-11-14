@@ -335,29 +335,42 @@ impl ProcessControlBlock {
         // push arguments on user stack
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
+        
+        let mut argv_all_sz = 0;
+        for i in 0..args.len() {
+            argv_all_sz += args[i].len() + 1
+        }
+        user_sp -= argv_all_sz;
+        let arg_cnt_base = user_sp;
+       
         user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
-        let argv_base = user_sp;
+        let arg_pt_base = user_sp;
+       
+        user_sp -= core::mem::size_of::<usize>();
+        *translated_refmut(new_token, user_sp as *mut usize) = args.len() as usize;
+       
         let mut argv: Vec<_> = (0..=args.len())
             .map(|arg| {
                 translated_refmut(
                     new_token,
-                    (argv_base + arg * core::mem::size_of::<usize>()) as *mut usize,
+                    (arg_pt_base + arg * core::mem::size_of::<usize>()) as *mut usize,
                 )
             })
             .collect();
         *argv[args.len()] = 0;
+        let mut arg_cnt_base_mut = arg_cnt_base;
         for i in 0..args.len() {
-            user_sp -= args[i].len() + 1;
-            *argv[i] = user_sp;
-            let mut p = user_sp;
+            *argv[i] = arg_cnt_base_mut;
+            let mut p = arg_cnt_base_mut;
             for c in args[i].as_bytes() {
                 *translated_refmut(new_token, p as *mut u8) = *c;
                 p += 1;
             }
             *translated_refmut(new_token, p as *mut u8) = 0;
+            arg_cnt_base_mut += args[i].len() + 1;
         }
         // make the user_sp aligned to 8B for k210 platform
-        user_sp -= user_sp % core::mem::size_of::<usize>();
+        // user_sp -= user_sp % core::mem::size_of::<usize>();
         // initialize trap_cx
         trace!("kernel: exec .. initialize trap_cx");
         let mut trap_cx = TrapContext::app_init_context(
@@ -368,7 +381,7 @@ impl ProcessControlBlock {
             trap_handler as usize,
         );
         trap_cx.x[10] = args.len();
-        trap_cx.x[11] = argv_base;
+        trap_cx.x[11] = arg_pt_base;
         *task_inner.get_trap_cx() = trap_cx;
     }
 
