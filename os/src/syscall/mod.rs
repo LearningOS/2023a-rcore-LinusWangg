@@ -11,6 +11,8 @@
 //! submodules, and you should also implement syscalls this way.
 
 /// openat syscall
+pub const SYSCALL_IOCTL: usize = 29;
+/// openat syscall
 pub const SYSCALL_OPENAT: usize = 56;
 /// close syscall
 pub const SYSCALL_CLOSE: usize = 57;
@@ -18,6 +20,8 @@ pub const SYSCALL_CLOSE: usize = 57;
 pub const SYSCALL_READ: usize = 63;
 /// write syscall
 pub const SYSCALL_WRITE: usize = 64;
+/// write syscall
+pub const SYSCALL_WRITEV: usize = 66;
 /// unlinkat syscall
 pub const SYSCALL_UNLINKAT: usize = 35;
 /// linkat syscall
@@ -102,6 +106,8 @@ pub const SYSCALL_CONDVAR_SIGNAL: usize = 472;
 pub const SYSCALL_CONDVAR_WAIT: usize = 473;
 /// set_tid_address syscall
 pub const SYSCALL_SET_TID_ADDRESS: usize = 96;
+/// ExitGroup
+pub const SYSCALL_EXIT_GROUP: usize = 94;
 
 mod fs;
 mod process;
@@ -155,6 +161,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
         SYSCALL_SET_TID_ADDRESS => sys_getpid(),
+        SYSCALL_IOCTL => sys_ioctl(args[0] as i32, args[1] as u64),
+        SYSCALL_WRITEV => sys_writev(args[0] as usize, args[1] as *const Iovec, args[2] as usize),
+        SYSCALL_EXIT_GROUP => sys_exitgroup(args[0] as usize),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
